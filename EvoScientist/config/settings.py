@@ -51,6 +51,7 @@ class EvoScientistConfig:
         nvidia_api_key: NVIDIA API key for NVIDIA models.
         google_api_key: Google API key for Gemini models.
         tavily_api_key: Tavily API key for web search.
+        exa_api_key: Exa API key for web search.
         provider: Default LLM provider ('anthropic', 'openai', 'google-genai', or 'nvidia').
         model: Default model name (short name or full ID).
         default_mode: Default workspace mode ('daemon' or 'run').
@@ -79,6 +80,7 @@ class EvoScientistConfig:
     custom_anthropic_base_url: str = ""
     ollama_base_url: str = ""
     tavily_api_key: str = ""
+    exa_api_key: str = ""
 
     # LLM Settings
     provider: str = "anthropic"
@@ -368,6 +370,7 @@ _ENV_MAPPINGS = {
     "custom_anthropic_base_url": "CUSTOM_ANTHROPIC_BASE_URL",
     "ollama_base_url": "OLLAMA_BASE_URL",
     "tavily_api_key": "TAVILY_API_KEY",
+    "exa_api_key": "EXA_API_KEY",
     "default_mode": "EVOSCIENTIST_DEFAULT_MODE",
     "default_workdir": "EVOSCIENTIST_WORKSPACE_DIR",
     "ui_backend": "EVOSCIENTIST_UI_BACKEND",
@@ -468,3 +471,5 @@ def apply_config_to_env(config: EvoScientistConfig) -> None:
         os.environ["OLLAMA_BASE_URL"] = config.ollama_base_url
     if config.tavily_api_key and not os.environ.get("TAVILY_API_KEY"):
         os.environ["TAVILY_API_KEY"] = config.tavily_api_key
+    if config.exa_api_key and not os.environ.get("EXA_API_KEY"):
+        os.environ["EXA_API_KEY"] = config.exa_api_key

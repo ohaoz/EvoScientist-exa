@@ -35,6 +35,7 @@ def temp_config_dir(tmp_path, monkeypatch):
         "ANTHROPIC_API_KEY",
         "OPENAI_API_KEY",
         "TAVILY_API_KEY",
+        "EXA_API_KEY",
         "EVOSCIENTIST_DEFAULT_MODE",
         "EVOSCIENTIST_WORKSPACE_DIR",
         "EVOSCIENTIST_UI_BACKEND",
@@ -50,6 +51,7 @@ def clean_env(monkeypatch):
         "ANTHROPIC_API_KEY",
         "OPENAI_API_KEY",
         "TAVILY_API_KEY",
+        "EXA_API_KEY",
         "EVOSCIENTIST_DEFAULT_MODE",
         "EVOSCIENTIST_WORKSPACE_DIR",
         "EVOSCIENTIST_UI_BACKEND",
@@ -70,6 +72,7 @@ class TestEvoScientistConfig:
         assert config.anthropic_api_key == ""
         assert config.openai_api_key == ""
         assert config.tavily_api_key == ""
+        assert config.exa_api_key == ""
         assert config.provider == "anthropic"
         assert config.model == "claude-sonnet-4-5"
         assert config.default_mode == "daemon"
@@ -297,6 +300,7 @@ class TestPriorityChain:
             "ANTHROPIC_API_KEY",
             "OPENAI_API_KEY",
             "TAVILY_API_KEY",
+            "EXA_API_KEY",
             "EVOSCIENTIST_DEFAULT_MODE",
             "EVOSCIENTIST_WORKSPACE_DIR",
             "EVOSCIENTIST_UI_BACKEND",
@@ -379,6 +383,7 @@ class TestApplyConfigToEnv:
             anthropic_api_key="config-ant-key",
             openai_api_key="config-oai-key",
             tavily_api_key="config-tav-key",
+            exa_api_key="config-exa-key",
         )
 
         apply_config_to_env(config)
@@ -386,6 +391,7 @@ class TestApplyConfigToEnv:
         assert os.environ.get("ANTHROPIC_API_KEY") == "config-ant-key"
         assert os.environ.get("OPENAI_API_KEY") == "config-oai-key"
         assert os.environ.get("TAVILY_API_KEY") == "config-tav-key"
+        assert os.environ.get("EXA_API_KEY") == "config-exa-key"
 
     def test_does_not_override_existing_env(self, monkeypatch):
         """Test that existing env vars are not overridden."""

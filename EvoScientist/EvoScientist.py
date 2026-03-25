@@ -151,13 +151,18 @@ def _build_prompt_refs() -> dict:
     }
 
 
+def _has_search_api_key() -> bool:
+    """Return whether any supported web search provider is configured."""
+    return bool(os.environ.get("EXA_API_KEY") or os.environ.get("TAVILY_API_KEY"))
+
+
 def _build_base_kwargs(base_backend, base_middleware):
     """Build agent kwargs *without* MCP (fast, no subprocess spawning)."""
     from .tools import skill_manager, tavily_search, think_tool
     from .utils import load_subagents
 
     tool_registry = {"think_tool": think_tool}
-    if os.environ.get("TAVILY_API_KEY"):
+    if _has_search_api_key():
         tool_registry["tavily_search"] = tavily_search
     base_tools = [think_tool, skill_manager]
 
@@ -193,7 +198,7 @@ def load_mcp_and_build_kwargs(base_backend, base_middleware):
         return _build_base_kwargs(base_backend, base_middleware)
 
     tool_registry = {"think_tool": think_tool}
-    if os.environ.get("TAVILY_API_KEY"):
+    if _has_search_api_key():
         tool_registry["tavily_search"] = tavily_search
     base_tools = [think_tool, skill_manager]
 
