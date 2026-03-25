@@ -68,6 +68,7 @@ def strip_thinking_tags(content: str) -> str:
 
 
 _SKIP_CONTENT_TYPES = frozenset({"thinking", "reasoning", "reasoning_content"})
+_INSTRUCTION_MESSAGE_TYPES = frozenset({"system", "developer"})
 
 
 def _flatten_message_content(content: Any) -> str | Any:
@@ -102,7 +103,66 @@ def _flatten_message_content(content: Any) -> str | Any:
     return "\n\n".join(parts) if parts else ""
 
 
-def _patch_openai_compat_content(model: Any) -> None:
+def _sanitize_openai_compat_messages(
+    messages: list["BaseMessage"],
+    *,
+    collapse_system_to_instructions: bool = False,
+) -> tuple[list["BaseMessage"], str | None]:
+    """Normalize OpenAI-compatible messages before request serialization.
+
+    Args:
+        messages: LangChain messages passed to the model.
+        collapse_system_to_instructions: When ``True``, extract system/developer
+            messages into a single instructions string instead of leaving them in
+            the message list. This is needed for Codex Responses API proxies,
+            which reject ``system`` messages but accept top-level instructions.
+
+    Returns:
+        Tuple of ``(sanitized_messages, instructions)``.
+    """
+    import copy
+
+    instructions_segments: list[str] = []
+    sanitized_messages: list["BaseMessage"] = []
+
+    for msg in messages:
+        content = msg.content
+        if isinstance(content, list):
+            content = _flatten_message_content(content)
+
+        if (
+            collapse_system_to_instructions
+            and getattr(msg, "type", None) in _INSTRUCTION_MESSAGE_TYPES
+        ):
+            if isinstance(content, str) and content.strip():
+                instructions_segments.append(content.strip())
+            continue
+
+        if content is not msg.content:
+            msg = copy.copy(msg)
+            msg.content = content
+        sanitized_messages.append(msg)
+
+    instructions = "\n\n".join(instructions_segments).strip()
+    return sanitized_messages, instructions or None
+
+
+def _merge_instructions(
+    extracted: str | None, existing: Any
+) -> str | Any:
+    """Combine extracted system instructions with an existing instructions kwarg."""
+    if not extracted:
+        return existing
+    if isinstance(existing, str) and existing.strip():
+        return f"{extracted}\n\n{existing.strip()}"
+    return extracted
+
+
+def _patch_openai_compat_content(
+    model: Any,
+    *,
+    collapse_system_to_instructions: bool = False,
+) -> None:
     """Flatten list content to strings before OpenAI-compatible API calls.
 
     Wraps ``_generate`` / ``_agenerate`` to prevent "invalid type: sequence,
@@ -111,20 +171,12 @@ def _patch_openai_compat_content(model: Any) -> None:
 
     Args:
         model: A LangChain chat model instance to patch in-place.
+        collapse_system_to_instructions: Whether to move system/developer
+            messages into a top-level ``instructions`` request field.
     """
-    import copy
     import functools
 
     from langchain_core.messages import BaseMessage
-
-    def _sanitize_messages(messages: list[BaseMessage]) -> list[BaseMessage]:
-        out: list[BaseMessage] = []
-        for msg in messages:
-            if isinstance(msg.content, list):
-                msg = copy.copy(msg)
-                msg.content = _flatten_message_content(msg.content)
-            out.append(msg)
-        return out
 
     orig_generate = getattr(model, "_generate", None)
     if orig_generate is None:
@@ -134,7 +186,16 @@ def _patch_openai_compat_content(model: Any) -> None:
     def _patched_generate(
         messages: list[BaseMessage], *args: Any, **kwargs: Any
     ) -> Any:
-        return orig_generate(_sanitize_messages(messages), *args, **kwargs)
+        sanitized_messages, instructions = _sanitize_openai_compat_messages(
+            messages,
+            collapse_system_to_instructions=collapse_system_to_instructions,
+        )
+        if instructions:
+            kwargs = dict(kwargs)
+            kwargs["instructions"] = _merge_instructions(
+                instructions, kwargs.get("instructions")
+            )
+        return orig_generate(sanitized_messages, *args, **kwargs)
 
     model._generate = _patched_generate
 
@@ -145,7 +206,16 @@ def _patch_openai_compat_content(model: Any) -> None:
         async def _patched_agenerate(
             messages: list[BaseMessage], *args: Any, **kwargs: Any
         ) -> Any:
-            return await orig_agenerate(_sanitize_messages(messages), *args, **kwargs)
+            sanitized_messages, instructions = _sanitize_openai_compat_messages(
+                messages,
+                collapse_system_to_instructions=collapse_system_to_instructions,
+            )
+            if instructions:
+                kwargs = dict(kwargs)
+                kwargs["instructions"] = _merge_instructions(
+                    instructions, kwargs.get("instructions")
+                )
+            return await orig_agenerate(sanitized_messages, *args, **kwargs)
 
         model._agenerate = _patched_agenerate
 
@@ -380,6 +450,7 @@ def get_chat_model(
         >>> model = get_chat_model("claude-3-opus-20240229", provider="anthropic")  # Full ID
     """
     model = model or DEFAULT_MODEL
+    base_url = ""
 
     # Look up short name in registry (provider-aware)
     model_id = None
@@ -501,7 +572,14 @@ def get_chat_model(
     # (DeepSeek, SiliconFlow, OpenRouter, custom-openai, etc.) and
     # native OpenAI through a proxy, to avoid "sequence expected string" errors.
     if _is_third_party or _is_openai_proxy:
-        _patch_openai_compat_content(chat_model)
+        collapse_system_to_instructions = (
+            "/codex/" in base_url.lower()
+            and bool(kwargs.get("use_responses_api"))
+        )
+        _patch_openai_compat_content(
+            chat_model,
+            collapse_system_to_instructions=collapse_system_to_instructions,
+        )
 
     return chat_model
 

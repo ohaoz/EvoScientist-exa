@@ -2,6 +2,8 @@
 
 from unittest.mock import patch
 
+from langchain_core.messages import HumanMessage, SystemMessage
+
 from EvoScientist.llm import (
     DEFAULT_MODEL,
     MODELS,
@@ -767,6 +769,39 @@ class TestAutoConfig:
         assert call_kwargs["api_key"] == "ccproxy-oauth"
         # Proxy mode: reasoning skipped (triggers Responses API → rs_ 404)
         assert "reasoning" not in call_kwargs
+
+    @patch("EvoScientist.llm.models.init_chat_model")
+    def test_codex_proxy_moves_system_messages_to_instructions(
+        self, mock_init, monkeypatch
+    ):
+        """Codex proxy should receive top-level instructions instead of system messages."""
+
+        class DummyModel:
+            def __init__(self):
+                self.calls = []
+
+            def _generate(self, messages, *args, **kwargs):
+                self.calls.append((messages, kwargs))
+                return "ok"
+
+        dummy = DummyModel()
+        mock_init.return_value = dummy
+        monkeypatch.setenv("OPENAI_BASE_URL", "http://127.0.0.1:8000/codex/v1")
+        monkeypatch.setenv("OPENAI_API_KEY", "ccproxy-oauth")
+
+        model = get_chat_model("gpt-5-nano", provider="openai")
+
+        model._generate(
+            [
+                SystemMessage(content="system rules"),
+                HumanMessage(content="hello"),
+            ]
+        )
+
+        assert len(dummy.calls) == 1
+        messages, call_kwargs = dummy.calls[0]
+        assert [getattr(msg, "type", None) for msg in messages] == ["human"]
+        assert call_kwargs["instructions"] == "system rules"
 
     @patch("EvoScientist.llm.models.init_chat_model")
     def test_openai_no_base_url_when_unset(self, mock_init, monkeypatch):
