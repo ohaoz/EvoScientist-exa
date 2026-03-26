@@ -1169,10 +1169,11 @@ def _configure_logging():
 
         def emit(self, record: logging.LogRecord) -> None:
             if record.levelno == logging.WARNING:
-                # Use Rich console to print dim warning
+                # Keep warning output ASCII-only so legacy Windows code pages
+                # (for example GBK) don't crash on emoji rendering.
                 msg = record.getMessage()
                 console.print(
-                    f"[dim yellow]\u26a0\ufe0f  Warning:[/dim yellow] [dim]{escape(msg)}[/dim]"
+                    f"[dim yellow]Warning:[/dim yellow] [dim]{escape(msg)}[/dim]"
                 )
             else:
                 super().emit(record)

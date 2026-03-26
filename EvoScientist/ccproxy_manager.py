@@ -20,6 +20,8 @@ from EvoScientist.config import EvoScientistConfig
 
 logger = logging.getLogger(__name__)
 
+_AUTH_STATUS_TIMEOUT_SECONDS = 30
+
 
 # =============================================================================
 # Availability & auth checks
@@ -127,7 +129,7 @@ def check_ccproxy_auth(provider: str = "claude_api") -> tuple[bool, str]:
             [exe, "auth", "status", provider],
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=_AUTH_STATUS_TIMEOUT_SECONDS,
         )
         import re as _re
 
@@ -176,7 +178,68 @@ def is_ccproxy_running(port: int) -> bool:
         return False
 
 
-def start_ccproxy(port: int) -> subprocess.Popen:
+def _build_ccproxy_env() -> dict[str, str]:
+    """Build subprocess env for ccproxy with explicit proxy propagation.
+
+    ccproxy may be launched from shells that do not export proxy vars
+    consistently. Mirror both upper/lower-case names and default to the
+    user's local Clash-style proxy on 127.0.0.1:7890 when none is set.
+    """
+    env = os.environ.copy()
+    proxy_url = (
+        env.get("ALL_PROXY")
+        or env.get("all_proxy")
+        or env.get("HTTPS_PROXY")
+        or env.get("https_proxy")
+        or env.get("HTTP_PROXY")
+        or env.get("http_proxy")
+        or "http://127.0.0.1:7890"
+    )
+
+    for key in (
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+    ):
+        env[key] = proxy_url
+
+    no_proxy = env.get("NO_PROXY") or env.get("no_proxy") or ""
+    no_proxy_items = [item.strip() for item in no_proxy.split(",") if item.strip()]
+    for host in ("localhost", "127.0.0.1", "::1"):
+        if host not in no_proxy_items:
+            no_proxy_items.append(host)
+    merged_no_proxy = ",".join(no_proxy_items)
+    env["NO_PROXY"] = merged_no_proxy
+    env["no_proxy"] = merged_no_proxy
+    return env
+
+
+def _build_ccproxy_command(
+    port: int, *, anthropic_oauth: bool = False, openai_oauth: bool = False
+) -> list[str]:
+    """Build the ccproxy serve command for the requested provider mix."""
+    exe = _ccproxy_exe() or "ccproxy"
+    cmd = [exe, "serve", "--port", str(port)]
+
+    # OpenAI-only sessions do not need Claude plugin bootstrapping.
+    if openai_oauth and not anthropic_oauth:
+        for plugin_name in ("claude_api", "oauth_claude", "claude_sdk"):
+            cmd.extend(["--disable-plugin", plugin_name])
+
+    # Anthropic-only sessions do not need Codex plugin bootstrapping.
+    if anthropic_oauth and not openai_oauth:
+        for plugin_name in ("codex", "oauth_codex", "copilot"):
+            cmd.extend(["--disable-plugin", plugin_name])
+
+    return cmd
+
+
+def start_ccproxy(
+    port: int, *, anthropic_oauth: bool = False, openai_oauth: bool = False
+) -> subprocess.Popen:
     """Start ccproxy serve as a background process.
 
     Args:
@@ -189,11 +252,14 @@ def start_ccproxy(port: int) -> subprocess.Popen:
         RuntimeError: If ccproxy fails to become healthy within 30 seconds.
         FileNotFoundError: If ccproxy binary is not found.
     """
-    exe = _ccproxy_exe() or "ccproxy"
+    cmd = _build_ccproxy_command(
+        port, anthropic_oauth=anthropic_oauth, openai_oauth=openai_oauth
+    )
     proc = subprocess.Popen(
-        [exe, "serve", "--port", str(port)],
+        cmd,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        env=_build_ccproxy_env(),
     )
 
     # Wait for health (ccproxy can take up to ~11s on first start)
@@ -233,7 +299,9 @@ def stop_ccproxy(proc: subprocess.Popen | None) -> None:
         pass
 
 
-def ensure_ccproxy(port: int) -> subprocess.Popen | None:
+def ensure_ccproxy(
+    port: int, *, anthropic_oauth: bool = False, openai_oauth: bool = False
+) -> subprocess.Popen | None:
     """Ensure ccproxy is running — reuse existing or start new.
 
     Returns:
@@ -242,7 +310,9 @@ def ensure_ccproxy(port: int) -> subprocess.Popen | None:
     if is_ccproxy_running(port):
         logger.debug("ccproxy already running on port %d", port)
         return None
-    return start_ccproxy(port)
+    return start_ccproxy(
+        port, anthropic_oauth=anthropic_oauth, openai_oauth=openai_oauth
+    )
 
 
 # =============================================================================
@@ -299,15 +369,25 @@ def _patch_ccproxy_oauth_header() -> None:
     """
     import pathlib
     import re
+    import sys
 
     try:
         ccproxy_bin = _ccproxy_exe()
         if not ccproxy_bin:
             return
 
-        # Find the Python interpreter used by the ccproxy binary via shebang
-        shebang = pathlib.Path(ccproxy_bin).read_text().splitlines()[0]
-        python_exe = shebang.lstrip("#!").strip()
+        ccproxy_path = pathlib.Path(ccproxy_bin)
+        if ccproxy_path.suffix.lower() == ".exe":
+            # Windows console_scripts use an .exe launcher, not a text shebang.
+            candidate = ccproxy_path.resolve().parent.parent / "python.exe"
+            python_exe = str(candidate) if candidate.exists() else sys.executable
+        else:
+            # POSIX console_scripts are regular text entrypoints with a shebang.
+            lines = ccproxy_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+            if not lines or not lines[0].startswith("#!"):
+                python_exe = sys.executable
+            else:
+                python_exe = lines[0].lstrip("#!").strip()
 
         # Ask that Python where ccproxy's adapter lives
         result = subprocess.run(
@@ -326,7 +406,7 @@ def _patch_ccproxy_oauth_header() -> None:
         if not src_file.exists():
             return
 
-        text = src_file.read_text()
+        text = src_file.read_text(encoding="utf-8")
 
         # Check if already correctly patched (oauth header set after cli_headers)
         correct = 'filtered_headers["anthropic-beta"] = "oauth-2025-04-20"'
@@ -356,7 +436,7 @@ def _patch_ccproxy_oauth_header() -> None:
         if patched == text:
             return
 
-        src_file.write_text(patched)
+        src_file.write_text(patched, encoding="utf-8")
         for pyc in src_file.parent.glob("__pycache__/adapter*.pyc"):
             pyc.unlink(missing_ok=True)
         logger.info("Auto-patched ccproxy adapter: set anthropic-beta=oauth-2025-04-20")
@@ -418,7 +498,9 @@ def maybe_start_ccproxy(config: EvoScientistConfig) -> subprocess.Popen | None:
     _patch_ccproxy_oauth_header()
 
     # Start ccproxy (single process serves both providers)
-    proc = ensure_ccproxy(port)
+    proc = ensure_ccproxy(
+        port, anthropic_oauth=anthropic_oauth, openai_oauth=openai_oauth
+    )
 
     # Set environment for each OAuth provider
     if anthropic_oauth:

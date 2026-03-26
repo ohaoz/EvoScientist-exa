@@ -159,6 +159,12 @@ uv pip install EvoScientist
 uv pip install git+https://github.com/EvoScientist/EvoScientist.git
 ```
 
+如果你是在自己的 fork 上测试补丁，可以直接安装 fork 分支：
+
+```bash
+uv pip install "git+https://github.com/<你的用户名>/EvoScientist-exa.git@<分支名>"
+```
+
 ### 开发安装
 
 ```bash
@@ -232,6 +238,14 @@ EvoSci onboard
 > [!TIP]
 > 向导将引导你完成供应商选择、密钥验证、模型选择和工作区模式设置。
 > 支持 CLI 编程智能体订阅用户通过 OAuth 直连——无需 API Key。
+
+> [!NOTE]
+> 在 Windows 上，OpenAI OAuth 会通过 `ccproxy` 转发请求。如果你使用
+> Clash 一类本地代理，例如 `http://127.0.0.1:7890`，请在启动 `EvoSci`
+> 前设置 `HTTP_PROXY`、`HTTPS_PROXY` 或 `ALL_PROXY`。EvoScientist 会把
+> 这些环境变量继续传给 `ccproxy`；当当前会话只使用 OpenAI OAuth 时，
+> 还会跳过 Claude 相关插件启动，避免无关的 Claude CLI 初始化失败拖慢
+> 或阻塞启动。
 
 ![onboard](https://raw.githubusercontent.com/EvoScientist/EvoScientist/main/.github/assets/EvoScientist_onboard.png)
 

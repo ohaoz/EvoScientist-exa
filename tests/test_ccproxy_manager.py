@@ -5,7 +5,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from EvoScientist import ccproxy_manager
 from EvoScientist.ccproxy_manager import (
+    _build_ccproxy_command,
+    _build_ccproxy_env,
     check_ccproxy_auth,
     ensure_ccproxy,
     is_ccproxy_available,
@@ -62,6 +65,7 @@ class TestCheckCcproxyAuth:
         assert valid is True
         cmd = mock_run.call_args[0][0]
         assert cmd[1:] == ["auth", "status", "codex"]
+        assert mock_run.call_args[1]["timeout"] == 30
 
     @patch("subprocess.run")
     def test_invalid_auth(self, mock_run):
@@ -77,6 +81,75 @@ class TestCheckCcproxyAuth:
         valid, msg = check_ccproxy_auth()
         assert valid is False
         assert "not found" in msg
+
+
+class TestPatchCcproxyOauthHeader:
+    @patch("EvoScientist.ccproxy_manager.subprocess.run")
+    @patch("EvoScientist.ccproxy_manager._ccproxy_exe")
+    def test_windows_launcher_uses_environment_python(
+        self, mock_ccproxy_exe, mock_run, tmp_path
+    ):
+        env_root = tmp_path / "env"
+        scripts_dir = env_root / "Scripts"
+        scripts_dir.mkdir(parents=True)
+
+        ccproxy_exe = scripts_dir / "ccproxy.exe"
+        ccproxy_exe.write_bytes(b"MZ")
+        python_exe = env_root / "python.exe"
+        python_exe.write_text("", encoding="utf-8")
+
+        adapter = tmp_path / "adapter.py"
+        adapter.write_text(
+            "cli_headers = self._collect_cli_headers()\n"
+            "for lk, value in cli_headers.items():\n"
+            "    filtered_headers[lk] = value\n",
+            encoding="utf-8",
+        )
+
+        mock_ccproxy_exe.return_value = str(ccproxy_exe)
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout=str(adapter), stderr=""
+        )
+
+        ccproxy_manager._patch_ccproxy_oauth_header()
+
+        assert mock_run.call_args[0][0][0] == str(python_exe)
+        patched = adapter.read_text(encoding="utf-8")
+        assert 'filtered_headers["anthropic-beta"] = "oauth-2025-04-20"' in patched
+
+
+class TestCcproxyCommandAndEnv:
+    def test_openai_only_disables_claude_plugins(self):
+        cmd = _build_ccproxy_command(
+            8000, anthropic_oauth=False, openai_oauth=True
+        )
+
+        assert cmd[:4] == [cmd[0], "serve", "--port", "8000"]
+        assert "--disable-plugin" in cmd
+        assert "claude_api" in cmd
+        assert "oauth_claude" in cmd
+        assert "claude_sdk" in cmd
+
+    def test_proxy_env_defaults_to_local_proxy(self, monkeypatch):
+        for key in (
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "all_proxy",
+            "NO_PROXY",
+            "no_proxy",
+        ):
+            monkeypatch.delenv(key, raising=False)
+
+        env = _build_ccproxy_env()
+
+        assert env["HTTP_PROXY"] == "http://127.0.0.1:7890"
+        assert env["HTTPS_PROXY"] == "http://127.0.0.1:7890"
+        assert env["ALL_PROXY"] == "http://127.0.0.1:7890"
+        assert "127.0.0.1" in env["NO_PROXY"]
+        assert "localhost" in env["NO_PROXY"]
 
 
 # =============================================================================
@@ -173,7 +246,22 @@ class TestEnsureCcproxy:
         mock_start.return_value = proc
         result = ensure_ccproxy(8000)
         assert result is proc
-        mock_start.assert_called_once_with(8000)
+        mock_start.assert_called_once_with(
+            8000, anthropic_oauth=False, openai_oauth=False
+        )
+
+    @patch("EvoScientist.ccproxy_manager.start_ccproxy")
+    @patch("EvoScientist.ccproxy_manager.is_ccproxy_running", return_value=False)
+    def test_needs_start_with_provider_flags(self, mock_running, mock_start):
+        proc = MagicMock()
+        mock_start.return_value = proc
+
+        result = ensure_ccproxy(8000, anthropic_oauth=False, openai_oauth=True)
+
+        assert result is proc
+        mock_start.assert_called_once_with(
+            8000, anthropic_oauth=False, openai_oauth=True
+        )
 
 
 # =============================================================================
@@ -386,7 +474,9 @@ class TestMaybeStartCcproxy:
         config.ccproxy_port = 7777
 
         maybe_start_ccproxy(config)
-        mock_ensure.assert_called_once_with(7777)
+        mock_ensure.assert_called_once_with(
+            7777, anthropic_oauth=True, openai_oauth=False
+        )
 
     @patch("EvoScientist.ccproxy_manager.check_ccproxy_auth", return_value=(True, "OK"))
     @patch("EvoScientist.ccproxy_manager.is_ccproxy_available", return_value=True)

@@ -150,6 +150,12 @@ To get the latest patches before a [PyPI](https://pypi.org/project/EvoScientist/
 uv pip install git+https://github.com/EvoScientist/EvoScientist.git
 ```
 
+Testing a patch from your fork instead of upstream?
+
+```bash
+uv pip install "git+https://github.com/<your-user>/EvoScientist-exa.git@<branch>"
+```
+
 ### Development Install
 
 ```bash
@@ -223,6 +229,14 @@ EvoSci onboard
 > [!TIP]
 > It walks you through provider selection, key validation, model choice, and workspace mode.
 > Supports OAuth sign-in for CLI coding agent subscribers — no API key needed.
+
+> [!NOTE]
+> On Windows, OpenAI OAuth runs through `ccproxy`. If you use a local HTTP proxy
+> such as Clash on `http://127.0.0.1:7890`, export `HTTP_PROXY`,
+> `HTTPS_PROXY`, or `ALL_PROXY` before launching `EvoSci`. EvoScientist will
+> forward those variables to `ccproxy`, and OpenAI-only OAuth sessions will
+> skip Claude plugin bootstrapping to avoid unrelated Claude CLI startup
+> failures.
 
 ![onboard](https://raw.githubusercontent.com/EvoScientist/EvoScientist/main/.github/assets/EvoScientist_onboard.png)
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from types import SimpleNamespace
 
 from EvoScientist.cli import commands
@@ -145,3 +146,30 @@ def test_serve_channel_thinking_respects_config_and_no_thinking(monkeypatch, tmp
         no_thinking=True,
     )
     assert captured_cli_off["send_thinking"] is False
+
+
+def test_configure_logging_renders_ascii_warning(monkeypatch):
+    captured: list[str] = []
+
+    def _fake_print(message):
+        captured.append(message)
+
+    monkeypatch.setattr(commands.console, "print", _fake_print)
+
+    root_logger = logging.getLogger()
+    old_handlers = root_logger.handlers[:]
+    old_level = root_logger.level
+
+    try:
+        commands._configure_logging()
+        logging.getLogger("evosci-test").warning("hello")
+    finally:
+        for handler in root_logger.handlers[:]:
+            root_logger.removeHandler(handler)
+        for handler in old_handlers:
+            root_logger.addHandler(handler)
+        root_logger.setLevel(old_level)
+
+    assert captured
+    assert "Warning:" in captured[0]
+    assert "⚠" not in captured[0]
