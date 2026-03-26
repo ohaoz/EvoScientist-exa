@@ -80,7 +80,11 @@ def _ensure_chat_model():
         from .llm import get_chat_model
 
         cfg = _ensure_config()
-        _chat_model = get_chat_model(model=cfg.model, provider=cfg.provider)
+        _chat_model = get_chat_model(
+            model=cfg.model,
+            provider=cfg.provider,
+            codex_reasoning_effort=cfg.codex_reasoning_effort,
+        )
     return _chat_model
 
 

@@ -268,6 +268,16 @@ export TAVILY_API_KEY="tvly-..."    # app.tavily.com
 
 也可以使用 `EvoSci config set` 将密钥持久化到 `~/.config/evoscientist/config.yaml`。
 
+对于通过 `ccproxy` 转发的 Codex/OpenAI OAuth 会话，也可以持久化配置
+Codex 请求的推理强度：
+
+```bash
+EvoSci config set codex_reasoning_effort xhigh
+```
+
+可选值为 `auto`、`minimal`、`low`、`medium`、`high`、`xhigh`。
+其中 `auto` 会保留默认行为。
+
 或者复制示例 `.env` 文件用于项目级配置：
 
 ```bash

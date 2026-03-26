@@ -444,6 +444,69 @@ def _patch_ccproxy_oauth_header() -> None:
         logger.warning("Could not auto-patch ccproxy adapter: %s", exc)
 
 
+def _patch_ccproxy_openai_reasoning_schema() -> None:
+    """Allow local ccproxy installs to accept OpenAI/Codex ``xhigh`` effort.
+
+    Some ccproxy builds still validate ``reasoning_effort`` against
+    ``minimal|low|medium|high`` only. EvoScientist can emit ``xhigh`` for Codex,
+    so patch the installed model schema in-place before starting ccproxy.
+    """
+    import pathlib
+    import sys
+
+    try:
+        ccproxy_bin = _ccproxy_exe()
+        if not ccproxy_bin:
+            return
+
+        ccproxy_path = pathlib.Path(ccproxy_bin)
+        if ccproxy_path.suffix.lower() == ".exe":
+            candidate = ccproxy_path.resolve().parent.parent / "python.exe"
+            python_exe = str(candidate) if candidate.exists() else sys.executable
+        else:
+            lines = ccproxy_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+            if not lines or not lines[0].startswith("#!"):
+                python_exe = sys.executable
+            else:
+                python_exe = lines[0].lstrip("#!").strip()
+
+        result = subprocess.run(
+            [
+                python_exe,
+                "-c",
+                "import inspect, ccproxy.llms.models.openai as m; print(inspect.getfile(m))",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            return
+
+        src_file = pathlib.Path(result.stdout.strip())
+        if not src_file.exists():
+            return
+
+        text = src_file.read_text(encoding="utf-8")
+        old_literal = 'Literal["minimal", "low", "medium", "high"]'
+        new_literal = 'Literal["minimal", "low", "medium", "high", "xhigh"]'
+        if new_literal in text:
+            return
+        if old_literal not in text:
+            return
+
+        patched = text.replace(old_literal, new_literal)
+        if patched == text:
+            return
+
+        src_file.write_text(patched, encoding="utf-8")
+        for pyc in src_file.parent.glob("__pycache__/openai*.pyc"):
+            pyc.unlink(missing_ok=True)
+        logger.info("Auto-patched ccproxy OpenAI schema: added xhigh reasoning effort")
+    except Exception as exc:
+        logger.warning("Could not auto-patch ccproxy OpenAI schema: %s", exc)
+
+
 def maybe_start_ccproxy(config: EvoScientistConfig) -> subprocess.Popen | None:
     """High-level: conditionally start ccproxy based on config.
 
@@ -496,6 +559,8 @@ def maybe_start_ccproxy(config: EvoScientistConfig) -> subprocess.Popen | None:
 
     # Auto-patch ccproxy adapter to fix OAuth header compatibility
     _patch_ccproxy_oauth_header()
+    if openai_oauth:
+        _patch_ccproxy_openai_reasoning_schema()
 
     # Start ccproxy (single process serves both providers)
     proc = ensure_ccproxy(

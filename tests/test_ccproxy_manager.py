@@ -117,6 +117,39 @@ class TestPatchCcproxyOauthHeader:
         patched = adapter.read_text(encoding="utf-8")
         assert 'filtered_headers["anthropic-beta"] = "oauth-2025-04-20"' in patched
 
+    @patch("EvoScientist.ccproxy_manager.subprocess.run")
+    @patch("EvoScientist.ccproxy_manager._ccproxy_exe")
+    def test_patches_openai_reasoning_schema_for_xhigh(
+        self, mock_ccproxy_exe, mock_run, tmp_path
+    ):
+        env_root = tmp_path / "env"
+        scripts_dir = env_root / "Scripts"
+        scripts_dir.mkdir(parents=True)
+
+        ccproxy_exe = scripts_dir / "ccproxy.exe"
+        ccproxy_exe.write_bytes(b"MZ")
+        python_exe = env_root / "python.exe"
+        python_exe.write_text("", encoding="utf-8")
+
+        openai_model = tmp_path / "openai.py"
+        openai_model.write_text(
+            'reasoning_effort: Literal["minimal", "low", "medium", "high"] | None = Field(\n'
+            "    default=None\n"
+            ")\n"
+            'effort: Literal["minimal", "low", "medium", "high"] | None = None\n',
+            encoding="utf-8",
+        )
+
+        mock_ccproxy_exe.return_value = str(ccproxy_exe)
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout=str(openai_model), stderr=""
+        )
+
+        ccproxy_manager._patch_ccproxy_openai_reasoning_schema()
+
+        patched = openai_model.read_text(encoding="utf-8")
+        assert '"xhigh"' in patched
+
 
 class TestCcproxyCommandAndEnv:
     def test_openai_only_disables_claude_plugins(self):

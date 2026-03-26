@@ -771,6 +771,22 @@ class TestAutoConfig:
         assert "reasoning" not in call_kwargs
 
     @patch("EvoScientist.llm.models.init_chat_model")
+    def test_codex_proxy_reasoning_effort_override(self, mock_init, monkeypatch):
+        """Codex proxy should accept an explicit Codex-only reasoning effort."""
+        mock_init.return_value = "mock_model"
+        monkeypatch.setenv("OPENAI_BASE_URL", "http://127.0.0.1:8000/codex/v1")
+        monkeypatch.setenv("OPENAI_API_KEY", "ccproxy-oauth")
+
+        get_chat_model(
+            "gpt-5-nano",
+            provider="openai",
+            codex_reasoning_effort="xhigh",
+        )
+
+        call_kwargs = mock_init.call_args[1]
+        assert call_kwargs["reasoning"] == {"effort": "xhigh", "summary": "auto"}
+
+    @patch("EvoScientist.llm.models.init_chat_model")
     def test_codex_proxy_moves_system_messages_to_instructions(
         self, mock_init, monkeypatch
     ):

@@ -15,6 +15,15 @@ from typing import Any, Literal
 import yaml
 from dotenv import find_dotenv, load_dotenv
 
+_CODEX_REASONING_EFFORT_VALUES = {
+    "auto",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+}
+
 # =============================================================================
 # Configuration paths
 # =============================================================================
@@ -65,6 +74,7 @@ class EvoScientistConfig:
     anthropic_auth_mode: str = "api_key"  # "api_key" | "oauth"
     openai_api_key: str = ""
     openai_auth_mode: str = "api_key"  # "api_key" | "oauth"
+    codex_reasoning_effort: str = "auto"  # auto | minimal | low | medium | high | xhigh
     nvidia_api_key: str = ""
     google_api_key: str = ""
     minimax_api_key: str = ""
@@ -234,6 +244,10 @@ def load_config() -> EvoScientistConfig:
         # Filter to only valid fields
         valid_fields = {f.name for f in fields(EvoScientistConfig)}
         filtered_data = {k: v for k, v in data.items() if k in valid_fields}
+        for key in list(filtered_data):
+            filtered_data[key] = _normalize_special_config_value(
+                key, filtered_data[key]
+            )
 
         return EvoScientistConfig(**filtered_data)
     except Exception:
@@ -292,6 +306,16 @@ def _coerce_value(value: Any, field_type: Any) -> Any:
     return str(value)
 
 
+def _normalize_special_config_value(key: str, value: Any) -> Any:
+    """Normalize config values with constrained string domains."""
+    if key == "codex_reasoning_effort":
+        normalized = str(value).strip().lower()
+        if normalized not in _CODEX_REASONING_EFFORT_VALUES:
+            raise ValueError(f"Invalid codex reasoning effort: {value}")
+        return normalized
+    return value
+
+
 def get_config_value(key: str) -> Any:
     """Get a single configuration value.
 
@@ -327,6 +351,7 @@ def set_config_value(key: str, value: Any) -> bool:
 
     try:
         value = _coerce_value(value, field_type)
+        value = _normalize_special_config_value(key, value)
     except (ValueError, TypeError):
         return False
 
@@ -355,6 +380,7 @@ _ENV_MAPPINGS = {
     "anthropic_auth_mode": "EVOSCIENTIST_ANTHROPIC_AUTH_MODE",
     "openai_api_key": "OPENAI_API_KEY",
     "openai_auth_mode": "EVOSCIENTIST_OPENAI_AUTH_MODE",
+    "codex_reasoning_effort": "EVOSCIENTIST_CODEX_REASONING_EFFORT",
     "nvidia_api_key": "NVIDIA_API_KEY",
     "google_api_key": "GOOGLE_API_KEY",
     "minimax_api_key": "MINIMAX_API_KEY",
@@ -409,7 +435,10 @@ def get_effective_config(
                 f for f in fields(EvoScientistConfig) if f.name == config_key
             )
             try:
-                data[config_key] = _coerce_value(env_value, field_info.type)
+                data[config_key] = _normalize_special_config_value(
+                    config_key,
+                    _coerce_value(env_value, field_info.type),
+                )
             except (ValueError, TypeError):
                 pass
 

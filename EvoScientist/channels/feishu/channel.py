@@ -390,6 +390,8 @@ class FeishuChannel(Channel, WebhookMixin, TokenMixin):
             # own event loop in this thread; its transport callbacks hit
             #   RuntimeError: cannot enter context: … is already entered
             # Fix: patch Handle._run to retry with a context copy.
+            import importlib
+
             _orig_handle_run = asyncio.Handle._run
 
             def _safe_handle_run(self):
@@ -402,7 +404,12 @@ class FeishuChannel(Channel, WebhookMixin, TokenMixin):
                     ctx.run(self._callback, *self._args)
 
             asyncio.Handle._run = _safe_handle_run
+            thread_loop = asyncio.new_event_loop()
             try:
+                asyncio.set_event_loop(thread_loop)
+                # lark_oapi stores the loop in a module-level global at import
+                # time; override it here so the SDK never reuses the main loop.
+                importlib.import_module("lark_oapi.ws.client").loop = thread_loop
                 ws_client.start()
             except Exception:
                 logger.exception(
@@ -411,6 +418,11 @@ class FeishuChannel(Channel, WebhookMixin, TokenMixin):
                     "Check app_id/app_secret and connection limits."
                 )
             finally:
+                try:
+                    if not thread_loop.is_closed():
+                        thread_loop.close()
+                except Exception:
+                    logger.debug("Failed to close Feishu SDK thread event loop")
                 asyncio.Handle._run = _orig_handle_run
 
         self._lark_ws_thread = threading.Thread(target=_run_ws, daemon=True)

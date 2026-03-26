@@ -1,7 +1,9 @@
 """Tests for Feishu channel implementation."""
 
+import asyncio
 import json
 import sys
+import types
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -600,6 +602,72 @@ class TestFeishuWebSocketMode:
         assert raw.text == "hello from websocket"
         assert raw.sender_id == "ou_test_ws"
         assert raw.is_group is False
+
+    def test_start_websocket_mode_uses_dedicated_sdk_loop(self):
+        config = FeishuConfig(
+            app_id="test-id",
+            app_secret="test-secret",
+            subscription_mode="websocket",
+        )
+        channel = FeishuChannel(config)
+        observed: dict[str, object] = {}
+
+        async def fake_refresh_token():
+            observed["main_loop"] = asyncio.get_running_loop()
+            channel._access_token = "fake-token"
+            channel._token_expires = 9999999999
+
+        channel._refresh_token = fake_refresh_token
+
+        fake_sdk_client_module = types.SimpleNamespace(loop=None)
+
+        class FakeBuilder:
+            def register_p2_im_message_receive_v1(self, callback):
+                observed["sdk_callback"] = callback
+                return self
+
+            def build(self):
+                return object()
+
+        class FakeDispatcherHandler:
+            @staticmethod
+            def builder(*_args):
+                return FakeBuilder()
+
+        class FakeWsClient:
+            def __init__(self, *_args, **_kwargs):
+                pass
+
+            def start(self):
+                observed["sdk_loop"] = fake_sdk_client_module.loop
+
+        class ImmediateThread:
+            def __init__(self, target, daemon=None):
+                self._target = target
+                self.daemon = daemon
+
+            def start(self):
+                self._target()
+
+        fake_lark = types.SimpleNamespace(
+            EventDispatcherHandler=FakeDispatcherHandler,
+            LogLevel=types.SimpleNamespace(WARNING="warning"),
+            ws=types.SimpleNamespace(Client=FakeWsClient),
+        )
+
+        with patch("httpx.AsyncClient", return_value=MagicMock()):
+            with patch("threading.Thread", ImmediateThread):
+                with patch.dict(
+                    sys.modules,
+                    {
+                        "lark_oapi": fake_lark,
+                        "lark_oapi.ws.client": fake_sdk_client_module,
+                    },
+                ):
+                    _run(channel.start())
+
+        assert observed["sdk_loop"] is not None
+        assert observed["sdk_loop"] is not observed["main_loop"]
 
     def test_cleanup_websocket_mode(self):
         config = FeishuConfig(

@@ -361,6 +361,9 @@ MODELS: dict[str, tuple[str, str]] = {
 }
 
 DEFAULT_MODEL = "claude-sonnet-4-6"
+_CODEX_REASONING_EFFORT_VALUES = frozenset(
+    {"auto", "minimal", "low", "medium", "high", "xhigh"}
+)
 
 
 def get_models_for_provider(provider: str) -> list[tuple[str, str]]:
@@ -381,6 +384,7 @@ def _apply_auto_config(
     is_third_party: bool,
     kwargs: dict[str, Any],
     original_provider: str | None = None,
+    codex_reasoning_effort: str = "auto",
 ) -> None:
     """Auto-enable provider-specific features (thinking, reasoning, etc.).
 
@@ -412,8 +416,14 @@ def _apply_auto_config(
         base_url = os.environ.get("OPENAI_BASE_URL", "")
         _is_openai_proxy = "127.0.0.1" in base_url or "localhost" in base_url
         if _is_openai_proxy:
-            # Skip reasoning kwarg for ccproxy — not needed and may cause issues.
-            pass
+            if "/codex/" in base_url.lower():
+                effort = str(codex_reasoning_effort or "auto").strip().lower()
+                if effort not in _CODEX_REASONING_EFFORT_VALUES:
+                    raise ValueError(
+                        f"Invalid codex reasoning effort: {codex_reasoning_effort}"
+                    )
+                if effort != "auto":
+                    kwargs["reasoning"] = {"effort": effort, "summary": "auto"}
         else:
             kwargs["reasoning"] = {"effort": "high", "summary": "auto"}
 
@@ -451,6 +461,9 @@ def get_chat_model(
     """
     model = model or DEFAULT_MODEL
     base_url = ""
+    codex_reasoning_effort = str(
+        kwargs.pop("codex_reasoning_effort", "auto") or "auto"
+    ).strip().lower()
 
     # Look up short name in registry (provider-aware)
     model_id = None
@@ -564,7 +577,14 @@ def get_chat_model(
         if base_url:
             kwargs["base_url"] = base_url
 
-    _apply_auto_config(provider, model_id, _is_third_party, kwargs, _original_provider)
+    _apply_auto_config(
+        provider,
+        model_id,
+        _is_third_party,
+        kwargs,
+        _original_provider,
+        codex_reasoning_effort=codex_reasoning_effort,
+    )
 
     chat_model = init_chat_model(model=model_id, model_provider=provider, **kwargs)
 

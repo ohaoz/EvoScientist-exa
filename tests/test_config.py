@@ -103,6 +103,11 @@ class TestEvoScientistConfig:
         config = EvoScientistConfig(openai_auth_mode="oauth")
         assert config.openai_auth_mode == "oauth"
 
+    def test_codex_reasoning_effort_default(self):
+        """Codex reasoning effort defaults to auto."""
+        config = EvoScientistConfig()
+        assert config.codex_reasoning_effort == "auto"
+
     def test_custom_values(self):
         """Test that custom values can be set."""
         config = EvoScientistConfig(
@@ -259,6 +264,15 @@ class TestGetSetValues:
         set_config_value("show_thinking", "yes")
         assert get_config_value("show_thinking") is True
 
+    def test_set_codex_reasoning_effort(self, temp_config_dir, clean_env):
+        """Codex reasoning effort should be persisted as a string setting."""
+        save_config(EvoScientistConfig())
+
+        result = set_config_value("codex_reasoning_effort", "xhigh")
+
+        assert result is True
+        assert get_config_value("codex_reasoning_effort") == "xhigh"
+
     def test_set_imessage_enabled_coercion(self, temp_config_dir, clean_env):
         """Test that imessage_enabled is coerced from string to bool."""
         save_config(EvoScientistConfig())
@@ -361,6 +375,14 @@ class TestPriorityChain:
 
         config = get_effective_config()
         assert config.anthropic_auth_mode == "oauth"
+
+    def test_env_codex_reasoning_effort_override(self, temp_config_dir, monkeypatch):
+        """Codex reasoning effort can be overridden via env var."""
+        save_config(EvoScientistConfig(codex_reasoning_effort="medium"))
+        monkeypatch.setenv("EVOSCIENTIST_CODEX_REASONING_EFFORT", "xhigh")
+
+        config = get_effective_config()
+        assert config.codex_reasoning_effort == "xhigh"
 
     def test_env_openai_auth_mode_override(self, temp_config_dir, monkeypatch):
         """Test openai_auth_mode from env overrides file."""

@@ -259,6 +259,16 @@ export TAVILY_API_KEY="tvly-..."    # app.tavily.com
 
 Or use `EvoSci config set` to persist keys in `~/.config/evoscientist/config.yaml`.
 
+For Codex/OpenAI OAuth sessions routed through `ccproxy`, you can also persist
+the reasoning effort used for Codex requests:
+
+```bash
+EvoSci config set codex_reasoning_effort xhigh
+```
+
+Accepted values are `auto`, `minimal`, `low`, `medium`, `high`, and `xhigh`.
+`auto` preserves the default behavior.
+
 Alternatively, copy the example `.env` file for project-level configuration:
 
 ```bash
